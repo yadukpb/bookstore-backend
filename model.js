@@ -38,11 +38,14 @@ const bookSchema = new mongoose.Schema({
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
   image: { type: String },
   wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Book' }],
   verified: { type: Boolean, default: false },
   location: { type: String },
   telegram: { type: String },
+  role: { type: String, enum: ['user', 'admin', 'seller'], default: 'user' },
+  refreshToken: { type: String }
 }, { timestamps: true });
 
 module.exports = {

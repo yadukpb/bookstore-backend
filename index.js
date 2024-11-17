@@ -442,7 +442,7 @@ app.post('/api/auth/logout', verifyToken, async (req, res) => {
 
 
 
-app.get('/api/books/:bookId', async (req, res) => {
+app.get('/api/books/:bookId', verifyToken, async (req, res) => {
   try {
     const book = await Book.findById(req.params.bookId)
       .populate('sellerId', 'name location telegram image');

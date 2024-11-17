@@ -437,6 +437,10 @@ app.post('/api/auth/logout', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Logout error:', error);
     res.status(500).json({ message: 'Server error during logout' });
+  } finally {
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
   }
 });
 
@@ -861,6 +865,41 @@ app.post('/api/wishlist/check', verifyToken, async (req, res) => {
     } catch (error) {
         console.error('Check wishlist error:', error);
         res.status(500).json({ message: 'Error checking wishlist' });
+    }
+});
+
+app.get('/api/purchases/:bookId', verifyToken, async (req, res) => {
+  try {
+    const purchase = await Purchase.findOne({
+      userId: req.user.id,
+      bookId: req.params.bookId,
+      status: 'completed'
+    }).populate('bookId sellerId', 'name price');
+
+    if (!purchase) {
+      return res.status(404).json({ message: 'Purchase not found' });
+    }
+
+    res.json(purchase);
+  } catch (error) {
+    console.error('Error fetching purchase details:', error);
+    res.status(500).json({ message: 'Error fetching purchase details' });
+  }
+});
+
+app.get('/api/recommendations', verifyToken, async (req, res) => {
+    try {
+        const { query } = req.query;
+        const book = await Book.findOne({ name: query });
+
+        if (!book) {
+            return res.status(404).json({ message: 'Book not found' });
+        }
+
+        res.json({ category: book.category });
+    } catch (error) {
+        console.error('Error fetching recommendations:', error);
+        res.status(500).json({ message: 'Error fetching recommendations' });
     }
 });
 

@@ -15,16 +15,22 @@ app.use(express.json());
 
 const PORT = 5007;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const MONGODB_URI = 'mongodb+srv://gifty:XT3LoeS4C0WJa9dU@bookstore.kqirq.mongodb.net/bookstore?retryWrites=true&w=majority';
+//const MONGODB_URI = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASS}@book-store.z2mz8.mongodb.net/?retryWrites=true&w=majority`;
+
+const MONGODB_URI = process.env.MONGO_URI ;
 
 // Cloudinary configuration
 cloudinary.config({
   cloud_name: 'dsooac8hy',
   api_key: '157549627848816',
-  api_secret: process.env.CLOUDINARY_API_SECRET // Store this in .env file
+  api_secret: 'AqNgFGvkeLWcMnqKVngNG1aew5I'
 });
 
-mongoose.connect(MONGODB_URI)
+mongoose.connect(MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000
+})
 .then(() => console.log('Connected to MongoDB'))
 .catch(err => console.error('MongoDB connection error:', err));
 
@@ -101,14 +107,14 @@ const purchaseSchema = new mongoose.Schema({
 const Purchase = mongoose.model('Purchase', purchaseSchema);
 
 const verifyToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ message: 'No token provided' });
-  }
-
   try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
@@ -128,8 +134,7 @@ const generateToken = (user) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    
-    const user = await User.findOne({ email }).populate('wishlist');
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -161,6 +166,11 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Server error during login' });
   }
+});
+
+
+app.get('/api/auth/verify', verifyToken, (req, res) => {
+  res.json({ user: req.user });
 });
 
 app.post('/api/auth/signup', async (req, res) => {
@@ -207,13 +217,13 @@ app.post('/api/auth/signup', async (req, res) => {
 
 app.post('/api/users/become-seller', verifyToken, async (req, res) => {
   try {
-    const { userId, telegram, location } = req.body;
+    const { telegram, location } = req.body;
     
     if (!telegram || !location) {
       return res.status(400).json({ message: 'Telegram and location are required' });
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -223,7 +233,7 @@ app.post('/api/users/become-seller', verifyToken, async (req, res) => {
     }
 
     const updatedUser = await User.findByIdAndUpdate(
-      userId,
+      req.user.id,
       {
         role: 'seller',
         verified: true,
@@ -285,17 +295,21 @@ app.post('/api/upload', verifyToken, upload.fields([
       try {
         const result = await cloudinary.uploader.upload(dataURI, {
           folder: 'books',
-          resource_type: 'auto',
-          transformation: [
-            { width: 800, height: 800, crop: 'limit' },
-            { quality: 'auto:good' },
-            { fetch_format: 'auto' }
-          ]
+          resource_type: 'image',
+          transformation: [{
+            width: 800,
+            height: 800,
+            crop: 'limit'
+          }]
         });
+        
         urls[fieldName] = result.secure_url;
       } catch (uploadError) {
         console.error(`Error uploading ${fieldName}:`, uploadError);
-        throw new Error(`Failed to upload ${fieldName}`);
+        return res.status(500).json({ 
+          message: `Error uploading ${fieldName}`, 
+          error: uploadError.message 
+        });
       }
     }
 
@@ -427,7 +441,7 @@ app.post('/api/auth/logout', verifyToken, async (req, res) => {
 });
 
 
-// Add this new endpoint for fetching a single book
+
 app.get('/api/books/:bookId', async (req, res) => {
   try {
     const book = await Book.findById(req.params.bookId)
@@ -548,8 +562,16 @@ app.get('/api/payments/check/:bookId', verifyToken, async (req, res) => {
 });
 
 // Add this new endpoint
-app.get('/api/auth/verify', verifyToken, (req, res) => {
-  res.json({ valid: true });
+app.get('/api/auth/verify', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    res.json({ valid: true, user });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
 app.get('/api/users/:userId', async (req, res) => {
@@ -758,8 +780,24 @@ app.get('/api/users/:userId', verifyToken, async (req, res) => {
 
 app.post('/api/books', verifyToken, async (req, res) => {
   try {
+    const user = await User.findById(req.user.id);
+    
+    if (!user || !user.verified || user.role !== 'seller') {
+      return res.status(403).json({ message: 'Only verified sellers can list books' });
+    }
+
     const bookData = {
-      ...req.body,
+      name: req.body.name,
+      description: req.body.description,
+      price: req.body.price,
+      mrp: req.body.mrp,
+      edition: req.body.edition,
+      publisher: req.body.publisher,
+      category: req.body.category.toLowerCase(),
+      bookFront: req.body.bookFront,
+      bookBack: req.body.bookBack,
+      bookIndex: req.body.bookIndex,
+      bookMiddle: req.body.bookMiddle,
       sellerId: req.user.id
     };
 
@@ -771,8 +809,11 @@ app.post('/api/books', verifyToken, async (req, res) => {
       book 
     });
   } catch (error) {
-    console.error('Error creating book:', error);
-    res.status(500).json({ message: 'Failed to create book' });
+    console.error('Book creation error:', error);
+    res.status(500).json({ 
+      message: 'Error creating book',
+      error: error.message 
+    });
   }
 });
 
@@ -799,6 +840,24 @@ app.post('/api/purchases', verifyToken, async (req, res) => {
     console.error('Purchase recording error:', error);
     res.status(500).json({ message: 'Failed to record purchase' });
   }
+});
+
+app.post('/api/wishlist/check', verifyToken, async (req, res) => {
+    try {
+        const { bookId } = req.body;
+        const userId = req.user.id;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const inWishlist = user.wishlist.includes(bookId);
+        res.json({ inWishlist });
+    } catch (error) {
+        console.error('Check wishlist error:', error);
+        res.status(500).json({ message: 'Error checking wishlist' });
+    }
 });
 
 app.listen(PORT, () => {

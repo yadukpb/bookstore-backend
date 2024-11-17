@@ -451,6 +451,9 @@ app.get('/api/books/:bookId', async (req, res) => {
       return res.status(404).json({ message: 'Book not found' });
     }
 
+    const userId = req.user ? req.user.id : null; // Get user ID if authenticated
+    const purchase = userId ? await Purchase.findOne({ userId, bookId: book._id }) : null; // Check if the user has purchased the book
+
     const formattedBook = {
       id: book._id,
       name: book.name,
@@ -470,7 +473,8 @@ app.get('/api/books/:bookId', async (req, res) => {
         location: book.sellerId.location,
         telegram: book.sellerId.telegram,
         image: book.sellerId.image
-      }
+      },
+      canChat: purchase !== null // Determine if the user can chat with the seller
     };
 
     res.json(formattedBook);
